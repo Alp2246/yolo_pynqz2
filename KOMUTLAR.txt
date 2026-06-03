@@ -23,12 +23,17 @@
   cd ~/zynq7020_dnndk_v3.1
   ./install.sh
 
---- HIZLI VIDEO (optimize kod) ---
+--- PC IP (Windows, yonetici PowerShell) ---
+  cd C:\Users\oalpe\Desktop\yolo_pynqz2
+  powershell -ExecutionPolicy Bypass -File setup_pc_network.ps1
+
+--- WEB PANOSU (onerilen) ---
   cd ~/tiny_yolo_pynqz2
-  # programs/tiny_yolo_video.cpp = bu repodaki dosya
-  mkdir -p objects
-  make -f makefile_video clean
-  make -f makefile_video
+  bash run_yolo_web.sh
+  Tarayici: http://192.168.2.99:8080
+
+--- TERMINAL VIDEO (X11) ---
+  make -f makefile_video clean && make -f makefile_video
   ./tiny_yolo
 
 --- KAMERA ---

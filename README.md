@@ -16,29 +16,31 @@ Bu depo, [YOLO on PYNQ-Z2](https://andre-araujo.gitbook.io/yolo-on-pynq-z2/) kur
 
 > Model dosyalari (`model/dpu_tiny_yolo.elf`) SD imajinda `~/tiny_yolo_pynqz2/model/` altinda gelir; bu repoya dahil degildir.
 
-## Hizli baslangic (kart uzerinde)
+## Web panosu (onerilen — X11 gerekmez)
+
+Kameradan canli tespit + kutular tarayicida:
 
 ```bash
-# Ag (seri konsoldan bir kez)
-ifconfig eth0 192.168.2.99
+# Kart (seri): ifconfig eth0 192.168.2.99
+# PC (PowerShell, yonetici):
+powershell -ExecutionPolicy Bypass -File setup_pc_network.ps1
 
-# DNNDK (ilk kurulumda, imajda yoksa)
-cd ~/zynq7020_dnndk_v3.1 && ./install.sh
-
+# Kartta:
 cd ~/tiny_yolo_pynqz2
+bash run_yolo_web.sh
+```
 
-# Bu repodaki programs/tiny_yolo_video.cpp dosyasini buraya kopyalayin
-# (scp veya USB)
+Tarayici: **http://192.168.2.99:8080** — canli goruntu, FPS, tespit listesi.
 
-mkdir -p objects programs
-make -f makefile_video clean
-make -f makefile_video
+## Terminal / X11 (klasik)
+
+```bash
+cd ~/tiny_yolo_pynqz2
+make -f makefile_video clean && make -f makefile_video
 ./tiny_yolo
 ```
 
-Terminalde saniyede bir pembe satir: `FPS: 12.x` (kamera ve X11'e gore degisir).
-
-Cikis: pencerede **q** veya `Ctrl+C`.
+MobaXterm X11 acikken pencere; terminalde `FPS: 12.x`.
 
 ## SD karta DPU imaji yazma (Windows)
 
@@ -78,10 +80,12 @@ MJPEG 640x480 destekleniyorsa kod otomatik MJPEG kullanir.
 
 ```
 yolo_pynqz2/
-├── programs/tiny_yolo_video.cpp   # optimize canli video
-├── makefile_video                 # ./tiny_yolo uretir
-├── makefile_image                 # tek resim (upstream .cpp gerekir)
-├── KOMUTLAR.txt                   # ozet komutlar
+├── programs/tiny_yolo_video.cpp   # optimize canli video (X11)
+├── programs/tiny_yolo_web.cpp     # web panosu (tarayici)
+├── makefile_video / makefile_web
+├── run_yolo_web.sh                # derle + web baslat
+├── setup_pc_network.ps1           # PC IP 192.168.2.10
+├── KOMUTLAR.txt
 └── README.md
 ```
 

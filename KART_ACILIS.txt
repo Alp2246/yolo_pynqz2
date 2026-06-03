@@ -1,0 +1,43 @@
+================================================================================
+  Etcher yazimi bitti -> PYNQ-Z2'de acilis (5 dakika)
+================================================================================
+
+1) SD karti OKUYUCUDAN CIKAR (Windows: Guvenle kaldir)
+
+2) PYNQ-Z2'ye TAK (arkadan, tam otursun)
+
+3) Jumper:
+   - Boot = SD
+   - Power = REG (guc adaptoru)
+
+4) Baglantilar:
+   - Guc adaptoru AC
+   - micro-USB -> PC (seri konsol icin)
+   - Ethernet RJ45 -> PC (sonra ag)
+
+5) PuTTY SERI:
+   - COM: Device Manager -> "USB Serial Port"
+   - Speed: 115200
+   - Beklenen prompt: root@pynqz2_dpu
+
+   YANLIS ise: xilinx@pynq = GPS karti, SD degistir!
+
+6) Read-only hata GORMEMELISIN.
+   Gorursen: SD tekrar Etcher ile yaz.
+
+7) Ag (seri konsolda):
+   ifconfig eth0 192.168.2.99
+
+8) PC ag:
+   IP 192.168.2.10  Alt ag 255.255.255.0
+
+9) Windows PowerShell (kart acikken):
+   cd C:\Users\oalpe\Desktop\yolo_pynqz2
+   powershell -ExecutionPolicy Bypass -File deploy_to_board.ps1
+
+10) MobaXterm X11 acik + USB webcam takili:
+    ssh root@192.168.2.99
+    cd ~/tiny_yolo_pynqz2
+    ./tiny_yolo
+
+================================================================================
