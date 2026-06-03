@@ -26,7 +26,7 @@
 using namespace std;
 using namespace cv;
 
-#define CONF      0.5f
+#define CONF      0.35f
 #define NMS_THRE  0.1f
 #define YOLOKERNEL "tiny_yolo"
 #define INPUTNODE  "conv2d_1_convolution"
@@ -273,25 +273,43 @@ static const char* HTML_PAGE = R"HTML(<!DOCTYPE html>
 :root{color-scheme:dark}
 *{box-sizing:border-box}
 body{margin:0;font-family:'Segoe UI',system-ui,sans-serif;background:#0d1117;color:#e6edf3}
-header{padding:14px 20px;background:#161b22;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-header h1{font-size:18px;margin:0}
-.badge{padding:4px 12px;border-radius:20px;font-size:13px;font-weight:600;background:#1f6feb;color:#fff}
-.wrap{display:grid;grid-template-columns:320px 1fr;gap:0;height:calc(100vh - 54px)}
+header{padding:12px 20px;background:#161b22;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+header h1{font-size:17px;margin:0;font-weight:600}
+.logo{width:26px;height:26px;border-radius:6px;background:linear-gradient(135deg,#1f6feb,#a371f7);display:inline-flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:#fff}
+.badge{padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;background:#1a7f37;color:#fff}
+.wrap{display:grid;grid-template-columns:340px 1fr;gap:0;height:calc(100vh - 53px)}
 @media(max-width:900px){.wrap{grid-template-columns:1fr;height:auto}}
 .panel{padding:16px;overflow-y:auto;border-right:1px solid #30363d}
 .card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px;margin-bottom:12px}
-.card h2{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#8b949e;margin:0 0 10px}
-.big{font-size:32px;font-weight:700;color:#58a6ff}
-.det{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #21262d;font-size:13px}
+.card h2{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:#8b949e;margin:0 0 10px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stat{background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:10px;text-align:center}
+.stat .v{font-size:26px;font-weight:700;color:#58a6ff;font-variant-numeric:tabular-nums}
+.stat .l{font-size:11px;color:#8b949e;margin-top:2px}
+.det{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #21262d;font-size:13px}
 .det:last-child{border:none}
-.conf{color:#3fb950;font-weight:600}
-.video-wrap{background:#010409;display:flex;align-items:center;justify-content:center;min-height:300px}
-#frame{max-width:100%;max-height:calc(100vh - 54px);object-fit:contain}
-.hint{font-size:12px;color:#8b949e}
+.dot{width:8px;height:8px;border-radius:50%;background:#f0a500;flex:0 0 auto}
+.det .nm{flex:1;text-transform:capitalize}
+.det .conf{color:#3fb950;font-weight:600;font-variant-numeric:tabular-nums}
+.bar-bg{height:5px;background:#21262d;border-radius:3px;overflow:hidden;margin-top:3px}
+.bar{height:100%;background:linear-gradient(90deg,#f0a500,#3fb950)}
+.video-wrap{background:#010409;display:flex;align-items:center;justify-content:center;min-height:300px;position:relative}
+#frame{max-width:100%;max-height:calc(100vh - 53px);object-fit:contain}
+.btn{width:100%;padding:9px;border:none;border-radius:8px;background:#1f6feb;color:#fff;font-size:13px;font-weight:600;cursor:pointer;margin-top:6px}
+.btn:hover{background:#388bfd}
+.btn.sec{background:#21262d}.btn.sec:hover{background:#30363d}
+.hint{font-size:12px;color:#8b949e;line-height:1.5}
+.alert-on{outline:3px solid #f85149;outline-offset:-3px}
+label.row{display:flex;align-items:center;gap:8px;font-size:13px;margin-top:6px}
+select{background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:5px 8px;flex:1}
+.tally{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.chip{background:#0d1117;border:1px solid #30363d;border-radius:14px;padding:3px 10px;font-size:12px;text-transform:capitalize}
+.chip b{color:#58a6ff}
 </style>
 </head>
 <body>
 <header>
+  <span class="logo">Y</span>
   <h1>PYNQ-Z2 · Tiny YOLO · DPU</h1>
   <span class="badge" id="live">CANLI</span>
   <span class="hint" id="status"></span>
@@ -300,43 +318,79 @@ header h1{font-size:18px;margin:0}
   <div class="panel">
     <div class="card">
       <h2>Performans</h2>
-      <div class="big" id="fps">-</div>
-      <div class="hint">FPS (kart uzerinde)</div>
+      <div class="stats">
+        <div class="stat"><div class="v" id="fps">-</div><div class="l">FPS</div></div>
+        <div class="stat"><div class="v" id="count">0</div><div class="l">Anlik nesne</div></div>
+        <div class="stat"><div class="v" id="total">0</div><div class="l">Toplam tespit</div></div>
+        <div class="stat"><div class="v" id="classes">0</div><div class="l">Farkli sinif</div></div>
+      </div>
     </div>
     <div class="card">
-      <h2>Tespitler</h2>
+      <h2>Anlik Tespitler</h2>
       <div id="dets"></div>
-      <div class="hint" id="nodet">Nesne bekleniyor...</div>
+      <div class="hint" id="nodet">Nesne bekleniyor... Kamerayi bir nesneye dogrultun.</div>
+    </div>
+    <div class="card">
+      <h2>Gorulen Siniflar</h2>
+      <div class="tally" id="tally"><span class="hint">-</span></div>
+    </div>
+    <div class="card">
+      <h2>Kontroller</h2>
+      <button class="btn" id="snap">Snapshot indir (PNG)</button>
+      <button class="btn sec" id="pause">Duraklat</button>
+      <label class="row">Uyari sinifi:
+        <select id="alertSel"><option value="">(kapali)</option></select>
+      </label>
+      <div class="hint" id="alertMsg"></div>
     </div>
   </div>
-  <div class="video-wrap">
+  <div class="video-wrap" id="vwrap">
     <img id="frame" alt="YOLO kamera" src="/frame">
   </div>
 </div>
 <script>
+const COCO=["person","bicycle","car","motorcycle","airplane","bus","train","truck","boat","traffic light","fire hydrant","stop sign","parking meter","bench","bird","cat","dog","horse","sheep","cow","elephant","bear","zebra","giraffe","backpack","umbrella","handbag","tie","suitcase","frisbee","skis","snowboard","sports ball","kite","baseball bat","baseball glove","skateboard","surfboard","tennis racket","bottle","wine glass","cup","fork","knife","spoon","bowl","banana","apple","sandwich","orange","broccoli","carrot","hot dog","pizza","donut","cake","chair","couch","potted plant","bed","dining table","toilet","tv","laptop","mouse","remote","keyboard","cell phone","microwave","oven","toaster","sink","refrigerator","book","clock","vase","scissors","teddy bear","hair drier","toothbrush"];
+const sel=document.getElementById('alertSel');
+COCO.forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c;sel.appendChild(o);});
+let paused=false, total=0; const seen={};
+document.getElementById('pause').onclick=function(){paused=!paused;this.textContent=paused?'Devam et':'Duraklat';};
+document.getElementById('snap').onclick=()=>{const a=document.createElement('a');a.href='/frame?t='+Date.now();a.download='yolo_'+Date.now()+'.png';a.click();};
 async function tick(){
-  try{
-    const r=await fetch('/data',{cache:'no-store'});
-    const d=await r.json();
-    document.getElementById('fps').textContent=d.fps>0?d.fps.toFixed(1):'-';
-    const box=document.getElementById('dets');
-    const nodet=document.getElementById('nodet');
-    box.innerHTML='';
-    if(d.detections&&d.detections.length){
-      nodet.style.display='none';
-      d.detections.forEach(x=>{
-        const row=document.createElement('div');row.className='det';
-        row.innerHTML='<span>'+x.label+'</span><span class="conf">'+(x.conf*100).toFixed(0)+'%</span>';
-        box.appendChild(row);
-      });
-    }else nodet.style.display='block';
-    const ago=d.seconds_ago!=null?d.seconds_ago:999;
-    document.getElementById('status').textContent=ago<2?'canli':'son kare '+Math.round(ago)+' sn once';
-    document.getElementById('live').style.background=ago<3?'#1a7f37':'#9e6a03';
-  }catch(e){}
-  document.getElementById('frame').src='/frame?t='+Date.now();
+  if(!paused){
+    try{
+      const r=await fetch('/data',{cache:'no-store'});
+      const d=await r.json();
+      document.getElementById('fps').textContent=d.fps>0?d.fps.toFixed(1):'-';
+      const dets=d.detections||[];
+      document.getElementById('count').textContent=dets.length;
+      const box=document.getElementById('dets');const nodet=document.getElementById('nodet');
+      box.innerHTML='';
+      if(dets.length){
+        nodet.style.display='none';
+        dets.forEach(x=>{
+          total++; seen[x.label]=(seen[x.label]||0)+1;
+          const row=document.createElement('div');row.className='det';
+          row.innerHTML='<span class="dot"></span><div style="flex:1"><div style="display:flex;justify-content:space-between"><span class="nm">'+x.label+'</span><span class="conf">'+(x.conf*100).toFixed(0)+'%</span></div><div class="bar-bg"><div class="bar" style="width:'+(x.conf*100)+'%"></div></div></div>';
+          box.appendChild(row);
+        });
+      }else nodet.style.display='block';
+      document.getElementById('total').textContent=total;
+      const ks=Object.keys(seen);
+      document.getElementById('classes').textContent=ks.length;
+      const tally=document.getElementById('tally');
+      tally.innerHTML=ks.length?'':'<span class="hint">-</span>';
+      ks.sort((a,b)=>seen[b]-seen[a]).forEach(k=>{const c=document.createElement('span');c.className='chip';c.innerHTML=k+' <b>'+seen[k]+'</b>';tally.appendChild(c);});
+      const al=sel.value;const vw=document.getElementById('vwrap');const am=document.getElementById('alertMsg');
+      if(al&&dets.some(x=>x.label===al)){vw.classList.add('alert-on');am.textContent='UYARI: "'+al+'" tespit edildi!';am.style.color='#f85149';}
+      else{vw.classList.remove('alert-on');am.textContent=al?('"'+al+'" izleniyor...'):'';am.style.color='#8b949e';}
+      const ago=d.seconds_ago!=null?d.seconds_ago:999;
+      document.getElementById('status').textContent=ago<2?'canli':'son kare '+Math.round(ago)+' sn once';
+      document.getElementById('live').style.background=ago<3?'#1a7f37':'#9e6a03';
+    }catch(e){}
+    document.getElementById('frame').src='/frame?t='+Date.now();
+  }
 }
-setInterval(tick,400);
+setInterval(tick,350);
 tick();
 </script>
 </body>

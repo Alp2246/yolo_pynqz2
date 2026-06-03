@@ -7,9 +7,10 @@ tiny_yolo_image
 yolo_image
 yolo_video
 
-# DPU model (SD imajinda zaten var, buyuk dosya)
+# DPU model (buyuk - kurulumda indirilir, repoya koyma)
 model/
 *.elf
+!docs/
 *.xmodel
 
 # Gecici

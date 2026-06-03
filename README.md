@@ -1,38 +1,80 @@
 # Tiny YOLO on PYNQ-Z2 (DPU)
 
-PYNQ-Z2 uzerinde **Tiny YOLO** nesne tespiti: USB webcam ile canli inference, DPU (DNNDK) hizlandirmali.
+PYNQ-Z2 uzerinde **Tiny YOLO** nesne tespiti: USB webcam, FPGA **DPU** (DNNDK) ile hizlandirilmis inference ve **tarayici web panosu**.
 
-Bu depo, [YOLO on PYNQ-Z2](https://andre-araujo.gitbook.io/yolo-on-pynq-z2/) kurulumunun uzerine **optimize edilmis** `tiny_yolo_video.cpp` ve Makefile'lari icerir (MJPEG kamera, hizli on-isleme, daha yuksek FPS).
+Bu proje, [YOLO on PYNQ-Z2](https://github.com/andre1araujo/YOLO-on-PYNQ-Z2) (Andre Araujo) kurulumunun uzerine optimize edilmis video kodu ve canli web arayuzu ekler.
+
+![Canli tespit ornegi](docs/dashboard.png)
+
+## Ozellikler
+
+- Canli USB webcam + DPU inference (~6 FPS, ortam isigina bagli)
+- Web panosu: `http://192.168.2.99:8080` (X11 gerekmez)
+- 80 COCO sinifi (person, car, cell phone, bottle, ...)
+- FPS, anlik tespit listesi, guven cubuklari
+- Snapshot indir, duraklat, sinif bazli uyari
+- Optimize on-isleme (MJPEG kamera, hizli letterbox)
 
 ## Gereksinimler
 
 | Parca | Aciklama |
 |--------|----------|
 | Kart | PYNQ-Z2 |
-| SD imaj | PetaLinux **pynqz2_dpu** (DPU + DNNDK) |
-| Guc | Regulator (REG jumper) onerilir |
-| Kamera | UVC uyumlu USB webcam |
-| Host | MobaXterm / X11 (canli pencere icin) veya sadece terminal FPS |
+| SD imaj | PetaLinux **pynqz2_dpu** ([DPU imaj](https://github.com/andre1araujo/YOLO-on-PYNQ-Z2)) |
+| Guc | REG jumper + adaptör |
+| Kamera | UVC USB webcam |
+| PC | Ethernet + tarayici |
 
-> Model dosyalari (`model/dpu_tiny_yolo.elf`) SD imajinda `~/tiny_yolo_pynqz2/model/` altinda gelir; bu repoya dahil degildir.
+> `model/dpu_tiny_yolo.elf` bu repoda yok (buyuk dosya). Kurulum scripti PC'den veya GitHub'dan indirir.
 
-## Web panosu (onerilen — X11 gerekmez)
+## Hizli kurulum
 
-Kameradan canli tespit + kutular tarayicida:
+### 1) SD karta DPU imaji (Windows)
 
-```bash
-# Kart (seri): ifconfig eth0 192.168.2.99
-# PC (PowerShell, yonetici):
-powershell -ExecutionPolicy Bypass -File setup_pc_network.ps1
+`pynqz2_dpu_ml16.img` → [balenaEtcher](https://etcher.balena.io/) ile SD'ye yaz.
 
-# Kartta:
-cd ~/tiny_yolo_pynqz2
-bash run_yolo_web.sh
+### 2) Baglanti
+
+| | |
+|---|---|
+| Seri (PuTTY 115200) | `root` / `root` |
+| Kart IP | `ifconfig eth0 192.168.2.99` |
+| PC IP | `192.168.2.10` (script: `setup_pc_network.ps1`) |
+
+### 3) Kartta kurulum (seri konsol)
+
+PC'de once HTTP sunucu (PowerShell, proje klasorunde):
+
+```powershell
+cd C:\Users\oalpe\Desktop\yolo_pynqz2
+python -m http.server 8000
 ```
 
-Tarayici: **http://192.168.2.99:8080** — canli goruntu, FPS, tespit listesi.
+Kartta:
 
-## Terminal / X11 (klasik)
+```bash
+curl -s http://192.168.2.10:8000/install_from_pc.sh | sh
+```
+
+Tarayici: **http://192.168.2.99:8080**
+
+### Guncelleme (kod degisince)
+
+```bash
+curl -s http://192.168.2.10:8000/update.sh | sh
+```
+
+## Web panosu
+
+| Ozellik | Aciklama |
+|---------|----------|
+| Canli video | Kutulu kamera goruntusu |
+| FPS / sayaclar | Anlik ve toplam tespit |
+| Sinif listesi | Gecmis oturumda gorulen siniflar |
+| Snapshot | Kareyi PNG indir |
+| Uyari | Secilen sinif (or. person) gorunce kirmizi cerceve |
+
+## Terminal (X11)
 
 ```bash
 cd ~/tiny_yolo_pynqz2
@@ -40,68 +82,26 @@ make -f makefile_video clean && make -f makefile_video
 ./tiny_yolo
 ```
 
-MobaXterm X11 acikken pencere; terminalde `FPS: 12.x`.
-
-## SD karta DPU imaji yazma (Windows)
-
-1. `pynqz2_dpu_ml16.rar` icinden `.img` cikar (7-Zip).
-2. SD karti USB okuyucu ile tak.
-3. [balenaEtcher](https://etcher.balena.io/) veya bu repodaki `flash_dpu.ps1` ile **yalnizca SD diske** yaz.
-4. Boot jumper **SD**, guc **REG**, DPU kartini tak, ac.
-
-Seri (PuTTY, 115200): kullanici **`root`**, sifre **`root`**.
-
-## Baglanti
-
-| Baglanti | Deger |
-|----------|--------|
-| Seri | COM port, 115200 baud |
-| Ethernet kart | `192.168.2.99` |
-| Ethernet PC | `192.168.2.10` / mask `255.255.255.0` |
-| SSH | `ssh root@192.168.2.99` |
-
-## Kamera kontrolu
-
-```bash
-ls /dev/video0
-v4l2-ctl --list-formats-ext -d /dev/video0
-```
-
-MJPEG 640x480 destekleniyorsa kod otomatik MJPEG kullanir.
-
-## Optimizasyonlar (`programs/tiny_yolo_video.cpp`)
-
-- Hizli letterbox + quantize (`set_input_image_fast`)
-- Kamera: MJPEG, dusuk buffer
-- Tek dongu (bellek / stabilite); istege bagli pipeline kodu dosyada yorumlu
-- Terminalde sade FPS ciktisi
-
 ## Proje yapisi
 
 ```
 yolo_pynqz2/
-├── programs/tiny_yolo_video.cpp   # optimize canli video (X11)
-├── programs/tiny_yolo_web.cpp     # web panosu (tarayici)
-├── makefile_video / makefile_web
-├── run_yolo_web.sh                # derle + web baslat
-├── setup_pc_network.ps1           # PC IP 192.168.2.10
-├── KOMUTLAR.txt
-└── README.md
+├── programs/
+│   ├── tiny_yolo_web.cpp      # web panosu + DPU
+│   └── tiny_yolo_video.cpp    # X11 / terminal
+├── makefile_web / makefile_video
+├── install_from_pc.sh         # ilk kurulum
+├── update.sh                  # hizli guncelleme
+├── setup_pc_network.ps1
+├── run_yolo_web.sh
+├── docs/                      # ornek goruntuler
+└── KOMUTLAR.txt
 ```
 
-## Tek resim (opsiyonel)
+## Kaynak
 
-Upstream `tiny_yolo_image.cpp` dosyasini `programs/` altina koyun:
-
-```bash
-make -f makefile_image
-./tiny_yolo_image dog.jpg
-```
-
-## Kaynak / tesekkur
-
-- Temel kurulum ve model: [andre1araujo/YOLO-on-PYNQ-Z2](https://github.com/andre1araujo/YOLO-on-PYNQ-Z2)
-- Kitap: [YOLO on PYNQ-Z2](https://andre-araujo.gitbook.io/yolo-on-pynq-z2/)
+- [andre1araujo/YOLO-on-PYNQ-Z2](https://github.com/andre1araujo/YOLO-on-PYNQ-Z2)
+- [YOLO on PYNQ-Z2 (GitBook)](https://andre-araujo.gitbook.io/yolo-on-pynq-z2/)
 
 ## Lisans
 
