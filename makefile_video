@@ -1,0 +1,43 @@
+# Tiny YOLO - USB webcam (canli video)
+# Kartta: make -f makefile_video clean && make -f makefile_video
+# Calistir: ./tiny_yolo  (veya: mv tiny_yolo tiny_yolo_video && ./tiny_yolo_video)
+
+YOLO    = tiny_yolo
+
+CXX     := g++
+YOLOOBJ := objects/tiny_yolo_video.o
+
+LDFLAGS = $(shell pkg-config --libs opencv) -lpthread -lhineon -ln2cube -ldputils
+
+CUR_DIR = $(shell pwd)
+MODEL   = $(CUR_DIR)/model/dpu_tiny_yolo.elf
+ARCH    = $(shell uname -m | sed -e s/arm.*/armv71/ -e s/aarch64.*/aarch64/)
+
+CFLAGS  := -O3 -Wall -Wpointer-arith -std=c++11 -ffast-math -funroll-loops
+
+ifeq ($(ARCH),armv71)
+	CFLAGS += -mcpu=cortex-a9 -mfloat-abi=hard -mfpu=neon
+endif
+ifeq ($(ARCH),aarch64)
+	CFLAGS += -mcpu=cortex-a53
+endif
+
+SRC_DIR = programs
+OBJ_DIR = objects
+
+SRC_FILES := $(wildcard $(SRC_DIR)/tiny_yolo_video.cpp)
+OBJ_FILES := $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(SRC_FILES))
+
+.PHONY: all clean
+
+all: $(YOLO)
+
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
+	@mkdir -p $(OBJ_DIR)
+	$(CXX) -c $(CFLAGS) $< -o $@
+
+$(YOLO): $(OBJ_FILES)
+	$(CXX) $(CFLAGS) $^ $(MODEL) -o $@ $(LDFLAGS)
+
+clean:
+	rm -f $(OBJ_DIR)/*.o $(YOLO)

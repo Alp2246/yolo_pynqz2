@@ -1,0 +1,45 @@
+================================================================================
+  PYNQ-Z2 + Tiny YOLO (DPU) - KOMUT OZETI
+================================================================================
+
+--- SD KART (Windows) ---
+  RAR ac: pynqz2_dpu_ml16.img
+  SD'ye yaz: Etcher veya flash_dpu.ps1 (SADECE USB SD disk!)
+  Kart: Boot=SD, Power=REG, DPU imaji takili
+
+--- SERI (PuTTY 115200) ---
+  Kullanici: root
+  Sifre:     root
+  Ag:        ifconfig eth0 192.168.2.99
+
+--- PC AG ---
+  IP: 192.168.2.10  mask 255.255.255.0
+  ping 192.168.2.99
+
+--- SSH ---
+  ssh root@192.168.2.99
+
+--- DNNDK (gerekirse) ---
+  cd ~/zynq7020_dnndk_v3.1
+  ./install.sh
+
+--- HIZLI VIDEO (optimize kod) ---
+  cd ~/tiny_yolo_pynqz2
+  # programs/tiny_yolo_video.cpp = bu repodaki dosya
+  mkdir -p objects
+  make -f makefile_video clean
+  make -f makefile_video
+  ./tiny_yolo
+
+--- KAMERA ---
+  ls /dev/video0
+  v4l2-ctl --list-formats-ext -d /dev/video0
+
+--- WINDOWS -> KARTA DOSYA GONDER ---
+  scp programs/tiny_yolo_video.cpp root@192.168.2.99:~/tiny_yolo_pynqz2/programs/
+
+--- NOT ---
+  GPS projesi = PYNQ 2.7 (xilinx@pynq) - FARKLI SD KART
+  YOLO projesi = pynqz2_dpu (root@pynqz2_dpu) - DPU SD KART
+
+================================================================================

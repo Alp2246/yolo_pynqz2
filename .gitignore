@@ -1,0 +1,24 @@
+# Derleme
+objects/
+*.o
+tiny_yolo
+tiny_yolo_video
+tiny_yolo_image
+yolo_image
+yolo_video
+
+# DPU model (SD imajinda zaten var, buyuk dosya)
+model/
+*.elf
+*.xmodel
+
+# Gecici
+*.log
+_msg.txt
+_yolo_*.sh
+flash_*.ps1
+flash_log.txt
+
+# OS
+.DS_Store
+Thumbs.db
