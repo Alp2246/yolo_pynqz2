@@ -18,7 +18,17 @@ if [ ! -x ./tiny_yolo_web ]; then
   exit 1
 fi
 
+# GPS cihazi: ortam degiskeni GPS_DEV ile gec (orn: GPS_DEV=/dev/ttyUSB0 bash run_yolo_web.sh)
+# Bos/yoksa GPS kapali calisir, pano yine acilir.
+GPS_ARG="${GPS_DEV:-}"
+
 echo "[3/3] Web sunucusu + YOLO basliyor..."
 echo "      Tarayici: http://192.168.2.99:8080"
 echo "      USB webcam takili olmali"
-exec ./tiny_yolo_web
+if [ -n "$GPS_ARG" ]; then
+  echo "      GPS: $GPS_ARG"
+  exec ./tiny_yolo_web "$GPS_ARG"
+else
+  echo "      GPS kapali (acmak icin: GPS_DEV=/dev/ttyUSB0 bash run_yolo_web.sh)"
+  exec ./tiny_yolo_web
+fi

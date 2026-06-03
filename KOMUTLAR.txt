@@ -32,6 +32,18 @@
   bash run_yolo_web.sh
   Tarayici: http://192.168.2.99:8080
 
+--- GPS (NEO-6M, opsiyonel - konum etiketli tespit) ---
+  Baglanti: NEO-6M -> USB-TTL (CH340/CP2102) -> kart USB
+    VCC->5V, GND->GND, NEO TX->TTL RX
+  Cihaz kontrol: ls /dev/ttyUSB0   (veya /dev/ttyACM0)
+  Calistir (otomatik algilar):
+    curl -s http://192.168.2.10:8000/update.sh | sh
+  Elle:
+    GPS_DEV=/dev/ttyUSB0 bash run_yolo_web.sh
+    ./tiny_yolo_web /dev/ttyUSB0
+  Panoda sag tarafta harita + koordinat + "son konumlu tespit" gorunur.
+  Ilk fix icin acik gokyuzu / pencere kenari gerekir.
+
 --- TERMINAL VIDEO (X11) ---
   make -f makefile_video clean && make -f makefile_video
   ./tiny_yolo

@@ -40,7 +40,20 @@ fi
 
 echo "[4] Baslatiliyor..."
 
-nohup ./tiny_yolo_web >/tmp/yolo_web.log 2>&1 &
+# GPS cihazini otomatik algila: GPS_DEV ortam degiskeni > /dev/ttyUSB0 > /dev/ttyACM0 > kapali
+GPS_ARG="$GPS_DEV"
+if [ -z "$GPS_ARG" ]; then
+  for d in /dev/ttyUSB0 /dev/ttyACM0 /dev/ttyPS1; do
+    if [ -e "$d" ]; then GPS_ARG="$d"; break; fi
+  done
+fi
+if [ -n "$GPS_ARG" ]; then
+  echo "    GPS cihazi: $GPS_ARG"
+  nohup ./tiny_yolo_web "$GPS_ARG" >/tmp/yolo_web.log 2>&1 &
+else
+  echo "    GPS cihazi bulunamadi (USB-TTL takili mi?) -> GPS kapali"
+  nohup ./tiny_yolo_web >/tmp/yolo_web.log 2>&1 &
+fi
 
 sleep 3
 

@@ -94,7 +94,19 @@ fi
 echo "[7/7] Web baslatiliyor..."
 fuser -k 8080/tcp 2>/dev/null || true
 sleep 1
-nohup ./tiny_yolo_web >/tmp/yolo_web.log 2>&1 &
+# GPS cihazi otomatik algilanir (USB-TTL takiliysa); yoksa GPS kapali calisir.
+GPS_ARG="$GPS_DEV"
+if [ -z "$GPS_ARG" ]; then
+  for d in /dev/ttyUSB0 /dev/ttyACM0 /dev/ttyPS1; do
+    if [ -e "$d" ]; then GPS_ARG="$d"; break; fi
+  done
+fi
+if [ -n "$GPS_ARG" ]; then
+  echo "  GPS: $GPS_ARG"
+  nohup ./tiny_yolo_web "$GPS_ARG" >/tmp/yolo_web.log 2>&1 &
+else
+  nohup ./tiny_yolo_web >/tmp/yolo_web.log 2>&1 &
+fi
 sleep 3
 if curl -s -m 2 http://127.0.0.1:8080/data | grep -q fps; then
   echo ""

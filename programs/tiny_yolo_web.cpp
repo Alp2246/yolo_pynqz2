@@ -19,6 +19,10 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <termios.h>
+#include <cstdlib>
+#include <cerrno>
 
 #include <opencv2/opencv.hpp>
 #include <dnndk/n2cube.h>
@@ -72,6 +76,137 @@ static string json_escape(const string& s) {
         else o += c;
     }
     return o;
+}
+
+// ---------------- GPS (NEO-6M) ----------------
+// GPS modulu YOLO kartina USB-TTL (/dev/ttyUSB0) veya PS UART (/dev/ttyPS1)
+// uzerinden 9600 baud baglanir. NMEA GGA/RMC cumleleri ayristirilir.
+struct GpsState {
+    bool   valid = false;   // konum fix var mi
+    double lat = 0, lon = 0, alt = 0;
+    int    sats = 0, quality = 0;
+    string utc;
+    long   bytes = 0;
+    double last_mono = 0;   // son gecerli fix zamani (steady)
+    bool   port_open = false;
+};
+static mutex     g_gps_mtx;
+static GpsState  g_gps;
+static atomic<bool> g_gps_enabled{false};
+
+static int open_serial(const char* dev) {
+    int fd = open(dev, O_RDONLY | O_NOCTTY | O_NONBLOCK);
+    if (fd < 0) return -1;
+    struct termios tio{};
+    if (tcgetattr(fd, &tio) != 0) { close(fd); return -1; }
+    cfsetispeed(&tio, B9600);
+    cfsetospeed(&tio, B9600);
+    tio.c_cflag = (tio.c_cflag & ~CSIZE) | CS8;   // 8N1
+    tio.c_cflag |= (CLOCAL | CREAD);
+    tio.c_cflag &= ~(PARENB | CSTOPB | CRTSCTS);
+    tio.c_iflag = IGNPAR;
+    tio.c_oflag = 0;
+    tio.c_lflag = 0;
+    tio.c_cc[VMIN]  = 0;
+    tio.c_cc[VTIME] = 1;
+    tcflush(fd, TCIFLUSH);
+    tcsetattr(fd, TCSANOW, &tio);
+    fcntl(fd, F_SETFL, 0);  // blokli moda al (VMIN/VTIME yonetsin)
+    return fd;
+}
+
+static double nmea_to_deg(const string& v, const string& hemi) {
+    if (v.size() < 4) return 0.0;
+    double raw = atof(v.c_str());
+    double deg = floor(raw / 100.0);
+    double minutes = raw - deg * 100.0;
+    double d = deg + minutes / 60.0;
+    if (hemi == "S" || hemi == "W") d = -d;
+    return d;
+}
+
+static vector<string> split_csv(const string& s) {
+    vector<string> out;
+    string cur;
+    for (char c : s) {
+        if (c == ',') { out.push_back(cur); cur.clear(); }
+        else if (c == '*') { break; }
+        else cur += c;
+    }
+    out.push_back(cur);
+    return out;
+}
+
+// Bir NMEA satirini ayristirip global duruma yazar.
+static void parse_nmea_line(const string& line) {
+    if (line.size() < 6 || line[0] != '$') return;
+    string type = line.substr(3, 3);  // GGA / RMC / GSV ...
+    vector<string> f = split_csv(line);
+
+    if (type == "GGA" && f.size() >= 10) {
+        // $..GGA,utc,lat,N/S,lon,E/W,quality,numsat,hdop,alt,M,...
+        int q = f[6].empty() ? 0 : atoi(f[6].c_str());
+        lock_guard<mutex> lk(g_gps_mtx);
+        g_gps.quality = q;
+        if (!f[7].empty()) g_gps.sats = atoi(f[7].c_str());
+        if (!f[1].empty()) {
+            string t = f[1];
+            if (t.size() >= 6)
+                g_gps.utc = t.substr(0,2) + ":" + t.substr(2,2) + ":" + t.substr(4,2);
+        }
+        if (q > 0 && !f[2].empty() && !f[4].empty()) {
+            g_gps.lat = nmea_to_deg(f[2], f[3]);
+            g_gps.lon = nmea_to_deg(f[4], f[5]);
+            if (!f[9].empty()) g_gps.alt = atof(f[9].c_str());
+            g_gps.valid = true;
+            g_gps.last_mono = chrono::steady_clock::now().time_since_epoch().count() / 1e9;
+        } else if (q == 0) {
+            g_gps.valid = false;
+        }
+    } else if (type == "RMC" && f.size() >= 7) {
+        // $..RMC,utc,status(A/V),lat,N/S,lon,E/W,...
+        lock_guard<mutex> lk(g_gps_mtx);
+        if (f[2] == "A" && !f[3].empty() && !f[5].empty()) {
+            g_gps.lat = nmea_to_deg(f[3], f[4]);
+            g_gps.lon = nmea_to_deg(f[5], f[6]);
+            g_gps.valid = true;
+            g_gps.last_mono = chrono::steady_clock::now().time_since_epoch().count() / 1e9;
+        }
+    }
+}
+
+static void gps_thread(string dev) {
+    while (g_running) {
+        int fd = open_serial(dev.c_str());
+        if (fd < 0) {
+            { lock_guard<mutex> lk(g_gps_mtx); g_gps.port_open = false; }
+            this_thread::sleep_for(chrono::seconds(2));
+            continue;
+        }
+        { lock_guard<mutex> lk(g_gps_mtx); g_gps.port_open = true; }
+        cout << "GPS: " << dev << " acildi (9600 baud)\n";
+        string line;
+        char buf[256];
+        while (g_running) {
+            ssize_t n = read(fd, buf, sizeof(buf));
+            if (n <= 0) {
+                if (n < 0 && errno == EINTR) continue;
+                this_thread::sleep_for(chrono::milliseconds(50));
+                continue;
+            }
+            { lock_guard<mutex> lk(g_gps_mtx); g_gps.bytes += n; }
+            for (ssize_t i = 0; i < n; ++i) {
+                char c = buf[i];
+                if (c == '\n' || c == '\r') {
+                    if (line.size() > 5) parse_nmea_line(line);
+                    line.clear();
+                } else if (line.size() < 120) {
+                    line += c;
+                }
+            }
+        }
+        close(fd);
+    }
 }
 
 static void set_input_image_fast(DPUTask* task, const Mat& img, const char* node) {
@@ -268,7 +403,9 @@ static const char* HTML_PAGE = R"HTML(<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PYNQ-Z2 Tiny YOLO</title>
+<title>PYNQ-Z2 Tiny YOLO + GPS</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
 :root{color-scheme:dark}
 *{box-sizing:border-box}
@@ -277,9 +414,14 @@ header{padding:12px 20px;background:#161b22;border-bottom:1px solid #30363d;disp
 header h1{font-size:17px;margin:0;font-weight:600}
 .logo{width:26px;height:26px;border-radius:6px;background:linear-gradient(135deg,#1f6feb,#a371f7);display:inline-flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:#fff}
 .badge{padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;background:#1a7f37;color:#fff}
-.wrap{display:grid;grid-template-columns:340px 1fr;gap:0;height:calc(100vh - 53px)}
-@media(max-width:900px){.wrap{grid-template-columns:1fr;height:auto}}
+.wrap{display:grid;grid-template-columns:320px 1fr 340px;gap:0;height:calc(100vh - 53px)}
+@media(max-width:1100px){.wrap{grid-template-columns:1fr;height:auto}}
 .panel{padding:16px;overflow-y:auto;border-right:1px solid #30363d}
+.panel.right{border-right:none;border-left:1px solid #30363d}
+#map{width:100%;height:260px;border-radius:10px;border:1px solid #30363d}
+.gps-off{opacity:.55}
+.fixdot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#9e6a03;margin-left:6px;vertical-align:middle}
+.fixdot.on{background:#2ea043}
 .card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px;margin-bottom:12px}
 .card h2{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:#8b949e;margin:0 0 10px}
 .stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -347,6 +489,25 @@ select{background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:6
   <div class="video-wrap" id="vwrap">
     <img id="frame" alt="YOLO kamera" src="/frame">
   </div>
+  <div class="panel right">
+    <div class="card">
+      <h2>Konum (GPS)<span class="fixdot" id="fixdot"></span></h2>
+      <div id="map"></div>
+    </div>
+    <div class="card">
+      <h2>GPS Verisi</h2>
+      <div class="det"><span class="nm">Enlem</span><span class="conf" id="glat">-</span></div>
+      <div class="det"><span class="nm">Boylam</span><span class="conf" id="glon">-</span></div>
+      <div class="det"><span class="nm">Rakim</span><span class="conf" id="galt">-</span></div>
+      <div class="det"><span class="nm">Uydu</span><span class="conf" id="gsat">-</span></div>
+      <div class="det"><span class="nm">UTC</span><span class="conf" id="gutc">-</span></div>
+      <div class="hint" id="gstat" style="margin-top:8px">GPS durumu kontrol ediliyor...</div>
+    </div>
+    <div class="card">
+      <h2>Son Konumlu Tespit</h2>
+      <div class="hint" id="geotag">Henuz konumlu tespit yok.</div>
+    </div>
+  </div>
 </div>
 <script>
 const COCO=["person","bicycle","car","motorcycle","airplane","bus","train","truck","boat","traffic light","fire hydrant","stop sign","parking meter","bench","bird","cat","dog","horse","sheep","cow","elephant","bear","zebra","giraffe","backpack","umbrella","handbag","tie","suitcase","frisbee","skis","snowboard","sports ball","kite","baseball bat","baseball glove","skateboard","surfboard","tennis racket","bottle","wine glass","cup","fork","knife","spoon","bowl","banana","apple","sandwich","orange","broccoli","carrot","hot dog","pizza","donut","cake","chair","couch","potted plant","bed","dining table","toilet","tv","laptop","mouse","remote","keyboard","cell phone","microwave","oven","toaster","sink","refrigerator","book","clock","vase","scissors","teddy bear","hair drier","toothbrush"];
@@ -355,6 +516,44 @@ COCO.forEach(c=>{const o=document.createElement('option');o.value=c;o.textConten
 let paused=false, total=0; const seen={};
 document.getElementById('pause').onclick=function(){paused=!paused;this.textContent=paused?'Devam et':'Duraklat';};
 document.getElementById('snap').onclick=()=>{const a=document.createElement('a');a.href='/frame?t='+Date.now();a.download='yolo_'+Date.now()+'.png';a.click();};
+
+let gmap=L.map('map',{zoomControl:true,attributionControl:false}).setView([39.0,35.0],5);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(gmap);
+let gmarker=null, gcentered=false;
+setTimeout(()=>gmap.invalidateSize(),300);
+function updateGps(g){
+  const fd=document.getElementById('fixdot');
+  const st=document.getElementById('gstat');
+  if(!g||!g.enabled){
+    st.textContent='GPS kapali. Baslatirken cihaz verin: ./tiny_yolo_web /dev/ttyUSB0';
+    fd.className='fixdot'; return;
+  }
+  if(!g.port_open){ st.textContent='GPS portu acilamadi (kablo/cihaz?).'; fd.className='fixdot'; return; }
+  if(g.valid){
+    fd.className='fixdot on';
+    document.getElementById('glat').textContent=g.lat.toFixed(6)+'°';
+    document.getElementById('glon').textContent=g.lon.toFixed(6)+'°';
+    document.getElementById('galt').textContent=g.alt.toFixed(1)+' m';
+    document.getElementById('gsat').textContent=g.sats;
+    document.getElementById('gutc').textContent=g.utc||'-';
+    st.textContent='FIX VAR · '+(g.age>=0?('son '+Math.round(g.age)+' sn'):'canli');
+    const ll=[g.lat,g.lon];
+    if(!gmarker) gmarker=L.marker(ll).addTo(gmap); else gmarker.setLatLng(ll);
+    if(!gcentered){ gmap.setView(ll,16); gcentered=true; }
+  }else{
+    fd.className='fixdot';
+    document.getElementById('gsat').textContent=g.sats;
+    st.textContent='Fix bekleniyor... ('+g.sats+' uydu, '+g.bytes+' byte) Anteni gokyuzune dogrultun.';
+  }
+}
+function geotag(dets,g){
+  const el=document.getElementById('geotag');
+  if(g&&g.valid&&dets.length){
+    const names=[...new Set(dets.map(d=>d.label))].join(', ');
+    el.innerHTML='<b style="color:#e6edf3">'+names+'</b><br>@ '+g.lat.toFixed(5)+', '+g.lon.toFixed(5)+
+      ' <a style="color:#58a6ff" target="_blank" href="https://www.openstreetmap.org/?mlat='+g.lat+'&mlon='+g.lon+'#map=18/'+g.lat+'/'+g.lon+'">haritada ac</a>';
+  }
+}
 async function tick(){
   if(!paused){
     try{
@@ -386,6 +585,7 @@ async function tick(){
       const ago=d.seconds_ago!=null?d.seconds_ago:999;
       document.getElementById('status').textContent=ago<2?'canli':'son kare '+Math.round(ago)+' sn once';
       document.getElementById('live').style.background=ago<3?'#1a7f37':'#9e6a03';
+      updateGps(d.gps); geotag(dets,d.gps);
     }catch(e){}
     document.getElementById('frame').src='/frame?t='+Date.now();
   }
@@ -409,6 +609,10 @@ static string build_json() {
     double now = chrono::steady_clock::now().time_since_epoch().count() / 1e9;
     double ago = (last_mono > 0) ? (now - last_mono) : 9999.0;
 
+    GpsState gps;
+    { lock_guard<mutex> lk(g_gps_mtx); gps = g_gps; }
+    double gps_ago = (gps.last_mono > 0) ? (now - gps.last_mono) : -1.0;
+
     ostringstream os;
     os << "{\"fps\":" << fps << ",\"seconds_ago\":" << ago << ",\"detections\":[";
     for (size_t i = 0; i < dets.size(); ++i) {
@@ -418,7 +622,19 @@ static string build_json() {
            << ",\"xmin\":" << dets[i].xmin << ",\"ymin\":" << dets[i].ymin
            << ",\"xmax\":" << dets[i].xmax << ",\"ymax\":" << dets[i].ymax << "}";
     }
-    os << "]}";
+    os << "],\"gps\":{"
+       << "\"enabled\":" << (g_gps_enabled.load() ? "true" : "false")
+       << ",\"port_open\":" << (gps.port_open ? "true" : "false")
+       << ",\"valid\":" << (gps.valid ? "true" : "false")
+       << ",\"lat\":" << (gps.valid ? gps.lat : 0.0)
+       << ",\"lon\":" << (gps.valid ? gps.lon : 0.0)
+       << ",\"alt\":" << gps.alt
+       << ",\"sats\":" << gps.sats
+       << ",\"quality\":" << gps.quality
+       << ",\"bytes\":" << gps.bytes
+       << ",\"utc\":\"" << json_escape(gps.utc) << "\""
+       << ",\"age\":" << gps_ago
+       << "}}";
     return os.str();
 }
 
@@ -504,9 +720,22 @@ static void http_server_thread() {
     close(srv);
 }
 
-int main() {
+int main(int argc, char** argv) {
     thread http_thr(http_server_thread);
     http_thr.detach();
+
+    // GPS cihazi: argv[1] > ortam degiskeni GPS_DEV > "off" (kapali)
+    string gps_dev;
+    if (argc > 1) gps_dev = argv[1];
+    else if (const char* e = getenv("GPS_DEV")) gps_dev = e;
+    if (!gps_dev.empty() && gps_dev != "off" && gps_dev != "none") {
+        g_gps_enabled.store(true);
+        thread gps_thr(gps_thread, gps_dev);
+        gps_thr.detach();
+        cout << "GPS etkin: " << gps_dev << "\n";
+    } else {
+        cout << "GPS kapali (etkinlestirmek icin: ./tiny_yolo_web /dev/ttyUSB0)\n";
+    }
 
     dpuOpen();
     DPUKernel* kernel = dpuLoadKernel(YOLOKERNEL);

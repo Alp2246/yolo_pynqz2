@@ -14,6 +14,7 @@ Bu proje, [YOLO on PYNQ-Z2](https://github.com/andre1araujo/YOLO-on-PYNQ-Z2) (An
 - FPS, anlik tespit listesi, guven cubuklari
 - Snapshot indir, duraklat, sinif bazli uyari
 - Optimize on-isleme (MJPEG kamera, hizli letterbox)
+- **GPS entegrasyonu (opsiyonel):** NEO-6M ile konum etiketli tespit — panoda canli harita + koordinat
 
 ## Gereksinimler
 
@@ -73,6 +74,42 @@ curl -s http://192.168.2.10:8000/update.sh | sh
 | Sinif listesi | Gecmis oturumda gorulen siniflar |
 | Snapshot | Kareyi PNG indir |
 | Uyari | Secilen sinif (or. person) gorunce kirmizi cerceve |
+| Konum (GPS) | Canli harita + koordinat + konum etiketli tespit (opsiyonel) |
+
+## GPS entegrasyonu — konum etiketli tespit (opsiyonel)
+
+NEO-6M GPS modulu YOLO kartina bir seri port uzerinden baglanir; pano "nerede, hangi nesne
+tespit edildi" bilgisini canli haritada gosterir. (GPS yoksa pano normal calisir.)
+
+![GPS konum panosu](docs/gps_dashboard.png)
+
+> Not: Gorseldeki koordinatlar ornek/temsilîdir (İstanbul, Eminönü).
+
+### Baglanti (USB-TTL — onerilen)
+
+En kolay yol: NEO-6M → USB-TTL donusturucu (CH340/CP2102) → kartin USB portu. Linux'ta
+`/dev/ttyUSB0` olarak gorunur (otomatik algilanir).
+
+| NEO-6M | USB-TTL |
+|--------|---------|
+| VCC | 5V (modul 3.3V regulatorlu) |
+| GND | GND |
+| TX | RX |
+| RX | TX (opsiyonel) |
+
+### Calistirma
+
+```bash
+# Otomatik (USB-TTL takiliysa update.sh /dev/ttyUSB0'i kendi bulur):
+curl -s http://192.168.2.10:8000/update.sh | sh
+
+# veya elle cihaz vererek:
+GPS_DEV=/dev/ttyUSB0 bash run_yolo_web.sh
+# ./tiny_yolo_web /dev/ttyUSB0
+```
+
+NMEA `GGA`/`RMC` cumleleri 9600 baud okunur, fix gelince haritada konum + son tespitin
+koordinat etiketi gorunur. Acik gokyuzu / pencere kenari ilk fix icin gerekir.
 
 ## Terminal (X11)
 
